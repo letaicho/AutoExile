@@ -60,16 +60,21 @@ namespace AutoExile.WebServer
             var flat = new Dictionary<string, SettingEntry>();
             var groups = Serialize(settings);
             foreach (var g in groups)
-                FlattenGroup(g, flat);
+                FlattenGroup(g, flat, "");
             return flat;
         }
 
-        private static void FlattenGroup(SettingsGroup group, Dictionary<string, SettingEntry> flat)
+        /// <param name="context">Subgroup chain below the top-level section, e.g. "Skill 1" or
+        /// "Harvest". Lets the UI disambiguate repeated labels like "Key" or "Mode".</param>
+        private static void FlattenGroup(SettingsGroup group, Dictionary<string, SettingEntry> flat, string context)
         {
             foreach (var s in group.Settings)
+            {
+                s.Group = context;
                 flat[s.Key] = s;
+            }
             foreach (var sub in group.Subgroups)
-                FlattenGroup(sub, flat);
+                FlattenGroup(sub, flat, string.IsNullOrEmpty(context) ? sub.Name : $"{context} › {sub.Name}");
         }
 
         /// <summary>Apply a single setting change by dotted path.</summary>
@@ -337,19 +342,28 @@ namespace AutoExile.WebServer
             var menuAttr = prop.GetCustomAttribute<MenuAttribute>();
             if (menuAttr != null)
             {
-                // MenuAttribute stores name and tooltip — try known property names
-                var attrType = menuAttr.GetType();
-                var nameProp = attrType.GetProperty("MenuName")
-                    ?? attrType.GetProperty("Name");
-                var descProp = attrType.GetProperty("Tooltip")
-                    ?? attrType.GetProperty("Description");
-
-                var name = nameProp?.GetValue(menuAttr)?.ToString() ?? FormatName(prop.Name);
-                var desc = descProp?.GetValue(menuAttr)?.ToString();
-                return (name, desc);
+                // MenuAttribute stores name and tooltip. Depending on the ExileCore build these are
+                // public fields (current HUD: MenuName/Tooltip) or properties — check both.
+                var name = ReadMember(menuAttr, "MenuName", "Name");
+                var desc = ReadMember(menuAttr, "Tooltip", "Description");
+                return (string.IsNullOrWhiteSpace(name) ? FormatName(prop.Name) : name!,
+                        string.IsNullOrWhiteSpace(desc) ? null : desc);
             }
 
             return (FormatName(prop.Name), null);
+        }
+
+        private static string? ReadMember(object obj, params string[] names)
+        {
+            var type = obj.GetType();
+            foreach (var n in names)
+            {
+                var p = type.GetProperty(n, BindingFlags.Public | BindingFlags.Instance);
+                if (p != null) return p.GetValue(obj)?.ToString();
+                var f = type.GetField(n, BindingFlags.Public | BindingFlags.Instance);
+                if (f != null) return f.GetValue(obj)?.ToString();
+            }
+            return null;
         }
 
         private static bool IsSettingsClass(Type type)
@@ -423,11 +437,13 @@ namespace AutoExile.WebServer
 
         private static string FormatName(string propName)
         {
-            // Insert spaces before capitals: "BlinkRange" → "Blink Range"
+            // Insert spaces before capitals and digit runs: "BlinkRange" → "Blink Range", "Skill1" → "Skill 1"
             var sb = new System.Text.StringBuilder();
             for (int i = 0; i < propName.Length; i++)
             {
-                if (i > 0 && char.IsUpper(propName[i]) && !char.IsUpper(propName[i - 1]))
+                var c = propName[i];
+                var prev = i > 0 ? propName[i - 1] : '\0';
+                if (i > 0 && ((char.IsUpper(c) && !char.IsUpper(prev)) || (char.IsDigit(c) && char.IsLetter(prev))))
                     sb.Append(' ');
                 sb.Append(propName[i]);
             }
@@ -451,6 +467,8 @@ namespace AutoExile.WebServer
     {
         public string Key { get; set; } = "";
         public string Label { get; set; } = "";
+        /// <summary>Subgroup path below the top-level section ("" for direct members), e.g. "Skill 1".</summary>
+        public string Group { get; set; } = "";
         public string? Description { get; set; }
         public string Type { get; set; } = "";
         public object? Value { get; set; }

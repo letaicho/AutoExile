@@ -462,6 +462,7 @@ tr:hover td { background:var(--surface2); }
   <div id="settingsTabBar" class="settings-tabs">
     <div class="settings-tab active" data-tab="mode" onclick="switchSettingsTab('mode')"><span id="modeTabLabel">Mode</span></div>
     <div class="settings-tab" data-tab="build" onclick="switchSettingsTab('build')">Build</div>
+    <div class="settings-tab" data-tab="keys" onclick="switchSettingsTab('keys')">Keybindings</div>
     <div class="settings-tab" data-tab="loot" onclick="switchSettingsTab('loot')">Loot</div>
     <div class="settings-tab" data-tab="all" onclick="switchSettingsTab('all')">All Settings</div>
     <div class="settings-tab" data-tab="advanced" onclick="switchSettingsTab('advanced')">Advanced</div>
@@ -1410,6 +1411,11 @@ function renderAllSettings() {
     ['build.manaFlaskSlot','0 = disabled'],['build.manaFlaskManaThreshold'],['build.utilityFlaskIntervalMs']]);
   c.appendChild(build);
 
+  // Keybindings tab
+  const keys = makeTabContent('keys', activeSettingsTab === 'keys');
+  renderKeybindingsTab(keys);
+  c.appendChild(keys);
+
   // Loot tab
   const loot = makeTabContent('loot', activeSettingsTab === 'loot');
   addSection(loot, 'Unique Filtering', [['loot.skipLowValueUniques'],
@@ -1447,7 +1453,9 @@ function renderAllSettings() {
     ['threat.threatRadius'],['threat.dodgeTriggerDistance'],['threat.dodgeDistance'],
     ['threat.dodgeMinProgress'],['threat.dodgeMaxProgress'],['threat.dodgeCooldownMs']]);
   addSection(adv, 'Web UI', [['webUiEnabled'],['webUiPort']]);
-  addSection(adv, 'Hotkeys', [['toggleRunning'],['testMapExplore'],['dumpGameState'],['dumpRecording']]);
+  const hotkeyLink = document.createElement('div'); hotkeyLink.style.cssText='text-align:center;padding:12px 0';
+  hotkeyLink.innerHTML = '<a href="#" style="color:var(--accent);font-size:13px" onclick="event.preventDefault();switchSettingsTab(\'keys\')">Hotkeys &amp; skill keys moved to Keybindings &rarr;</a>';
+  adv.appendChild(hotkeyLink);
   c.appendChild(adv);
 
   switchSettingsTab(activeSettingsTab);
@@ -1547,7 +1555,7 @@ function renderSkillsSection() {
         renderSkillFields(fieldsContainer, prefix, skillType, configIdx);
         body.appendChild(fieldsContainer);
       } else {
-        body.innerHTML = `<div style="padding:8px;color:var(--text-dim);font-size:13px">No config slot has key "${esc(detected.key)}". Assign key "${esc(detected.key)}" to one of the Skill 1-6 slots to configure.</div>`;
+        body.innerHTML = `<div style="padding:8px;color:var(--text-dim);font-size:13px">No config slot has key "${esc(detected.key)}". Assign key "${esc(detected.key)}" to one of the Skill 1-8 slots (or use the Keybindings tab) to configure.</div>`;
       }
 
       slot.appendChild(header); slot.appendChild(body); wrap.appendChild(slot);
@@ -1888,7 +1896,117 @@ async function scanPlayerBuffs(settingKey) {
   }
 }
 
-function buildField(key, entry, note) {
+const HOTKEY_OPTIONS = ['None','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12',
+  'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
+  'D0','D1','D2','D3','D4','D5','D6','D7','D8','D9',
+  'Insert','Delete','Home','End','PageUp','PageDown',
+  'Up','Down','Left','Right','Space','Tab','Escape',
+  'OemTilde','OemMinus','OemPlus','OemOpenBrackets','OemCloseBrackets','OemPipe','OemSemicolon','OemQuotes','OemComma','OemPeriod','OemQuestion'];
+
+function hotkeySelectHtml(key, curVal) {
+  curVal = curVal || '';
+  const opts = HOTKEY_OPTIONS.map(k => `<option value="${k}" ${k===curVal?'selected':''}>${k}</option>`).join('');
+  // If current value isn't in common list, prepend it
+  const extra = HOTKEY_OPTIONS.includes(curVal) ? '' : `<option value="${esc(curVal)}" selected>${esc(curVal)}</option>`;
+  return `<select onchange="updateSetting('${key}',this.value)">${extra}${opts}</select>`;
+}
+
+// Display label including subgroup context, e.g. "Skill 1 › Key" (labels like "Key"/"Mode" repeat across groups)
+function contextLabel(entry) {
+  return entry.group ? `${entry.group} › ${entry.label}` : entry.label;
+}
+
+// ==================== KEYBINDINGS TAB ====================
+const BOT_HOTKEYS = ['toggleRunning','testMapExplore','dumpGameState','dumpRecording','scanTileSignatures','recordGameplay'];
+const SKILL_SLOT_COUNT = 8;
+
+function renderKeybindingsTab(tab) {
+  tab.innerHTML = '';
+  const intro = document.createElement('div');
+  intro.style.cssText = 'font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.5';
+  intro.innerHTML = '<b>Bot hotkeys</b> are keys <i>you</i> press to control AutoExile. ' +
+    '<b>In-game keys</b> are keys the <i>bot</i> presses — they must match your Path of Exile keybindings.';
+  tab.appendChild(intro);
+
+  addSection(tab, 'Bot Hotkeys', BOT_HOTKEYS.map(k => [k]));
+
+  // ── Skill slots ──
+  const skillTitle = document.createElement('div'); skillTitle.className = 'section-divider';
+  skillTitle.textContent = 'Skill Slots (in-game keys)';
+  tab.appendChild(skillTitle);
+  tab.appendChild(buildMovementStatus());
+
+  const slots = [];
+  for (let i = 1; i <= SKILL_SLOT_COUNT; i++) {
+    const keyE = S[`build.skill${i}.key`], roleE = S[`build.skill${i}.role`];
+    if (keyE && roleE) slots.push({ i, keyE, roleE });
+  }
+  for (const { i, keyE, roleE } of slots) {
+    const keyVal = keyE.value || 'None';
+    const detected = keyVal !== 'None' ? detectedSkillBar.find(d => d.key === keyVal) : null;
+    const dupOf = keyVal !== 'None' ? slots.find(s => s.i < i && s.keyE.value === keyVal) : null;
+
+    let desc;
+    if (keyVal === 'None') desc = '<span class="setting-desc">Unassigned</span>';
+    else if (detected) desc = `<span class="setting-desc">In-game: <b style="color:var(--text)">${esc(detected.skillName)}</b></span>`;
+    else if (detectedSkillBar.length > 0) desc = `<span class="setting-desc" style="color:var(--orange)">Key ${esc(keyVal)} is not on your in-game skill bar</span>`;
+    else desc = '<span class="setting-desc">Not in game — skill bar not detected</span>';
+    if (dupOf) desc += `<span class="setting-desc" style="color:var(--orange)">Same key as Skill ${dupOf.i} — the Build tab's Skill Bar section edits Skill ${dupOf.i}</span>`;
+
+    const roleOpts = (roleE.options || []).map(o => `<option value="${esc(o)}" ${o===roleE.value?'selected':''}>${esc(o)}</option>`).join('');
+    const row = document.createElement('div'); row.className = 'setting-row'; row.dataset.key = `build.skill${i}.key`;
+    row.innerHTML = `<div class="setting-info"><span class="setting-label">Skill ${i}</span>${desc}</div>` +
+      `<div class="setting-control" style="display:flex;gap:6px">${hotkeySelectHtml(`build.skill${i}.key`, keyVal)}` +
+      `<select title="Role" onchange="updateSetting('build.skill${i}.role',this.value)">${roleOpts}</select></div>`;
+    tab.appendChild(row);
+  }
+
+  // ── Other in-game keys: any hotkey setting not shown above (e.g. run.portalKey) ──
+  const shown = new Set([...BOT_HOTKEYS, ...slots.map(s => `build.skill${s.i}.key`)]);
+  const other = Object.keys(S).filter(k => S[k].type === 'hotkey' && !shown.has(k));
+  if (other.length > 0) {
+    const otherTitle = document.createElement('div'); otherTitle.className = 'section-divider';
+    otherTitle.textContent = 'Other In-Game Keys';
+    tab.appendChild(otherTitle);
+    for (const k of other) tab.appendChild(buildField(k, S[k], null, { label: contextLabel(S[k]) }));
+  }
+}
+
+// Mirrors BotSettings.Build.GetPrimaryMovement(): first slot with a key and the PrimaryMovement role.
+function buildMovementStatus() {
+  const el = document.createElement('div');
+  el.style.cssText = 'font-size:12px;padding:8px 12px;margin-bottom:8px;border-radius:6px;border:1px solid var(--border);background:var(--surface2)';
+  let primary = null;
+  for (let i = 1; i <= SKILL_SLOT_COUNT; i++) {
+    const k = S[`build.skill${i}.key`], r = S[`build.skill${i}.role`];
+    if (k && r && k.value && k.value !== 'None' && r.value === 'PrimaryMovement') { primary = { i, key: k.value }; break; }
+  }
+  const gameMove = detectedSkillBar.find(d => d.skillName === 'Move');
+  let color, msg;
+  if (!primary) {
+    color = 'var(--red)';
+    msg = 'No skill slot has the <b>PrimaryMovement</b> role — the bot falls back to pressing <b>T</b> to move.';
+  } else if (gameMove && gameMove.key !== primary.key) {
+    color = 'var(--orange)';
+    msg = `Bot moves with <b>${esc(primary.key)}</b> (Skill ${primary.i}), but in-game <b>Move</b> is on <b>${esc(gameMove.key)}</b>. Set Skill ${primary.i} to ${esc(gameMove.key)}.`;
+  } else if (detectedSkillBar.length > 0 && !detectedSkillBar.some(d => d.key === primary.key)) {
+    color = 'var(--orange)';
+    msg = `Bot moves with <b>${esc(primary.key)}</b> (Skill ${primary.i}), but that key isn't on your in-game skill bar.`;
+  } else {
+    color = 'var(--green)';
+    msg = `Bot moves with <b>${esc(primary.key)}</b> (Skill ${primary.i})` + (gameMove ? ' — matches in-game Move.' : '.');
+  }
+  el.style.borderColor = color;
+  el.innerHTML = `<span style="color:${color}">&#9679;</span> ${msg}`;
+  return el;
+}
+
+function rerenderKeybindingsTab() {
+  const el = document.getElementById('stab-keys');
+  if (el) renderKeybindingsTab(el);
+}
+
+function buildField(key, entry, note, opts) {
   const row = document.createElement('div'); row.className='setting-row'; row.dataset.key=key;
   let input = '';
   switch(entry.type) {
@@ -1923,26 +2041,16 @@ function buildField(key, entry, note) {
         input = `<input type="text" value="${esc(entry.value||'')}" onchange="updateSetting('${key}',this.value)">`;
       }
       break;
-    case 'hotkey': {
-      const commonKeys = ['None','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12',
-        'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
-        'D0','D1','D2','D3','D4','D5','D6','D7','D8','D9',
-        'Insert','Delete','Home','End','PageUp','PageDown',
-        'Up','Down','Left','Right','Space','Tab','Escape',
-        'OemTilde','OemMinus','OemPlus','OemOpenBrackets','OemCloseBrackets','OemPipe','OemSemicolon','OemQuotes','OemComma','OemPeriod','OemQuestion'];
-      const curVal = entry.value || '';
-      const opts = commonKeys.map(k => `<option value="${k}" ${k===curVal?'selected':''}>${k}</option>`).join('');
-      // If current value isn't in common list, prepend it
-      const extra = commonKeys.includes(curVal) ? '' : `<option value="${esc(curVal)}" selected>${esc(curVal)}</option>`;
-      input = `<select onchange="updateSetting('${key}',this.value)">${extra}${opts}</select>`;
+    case 'hotkey':
+      input = hotkeySelectHtml(key, entry.value);
       break;
-    }
     default:
       input = `<span class="hotkey-badge">${esc(String(entry.value||''))}</span>`;
   }
   const desc = entry.description ? `<span class="setting-desc">${esc(entry.description)}</span>` : '';
   const noteHtml = note ? `<span class="setting-desc" style="color:var(--accent)">${esc(note)}</span>` : '';
-  row.innerHTML = `<div class="setting-info"><span class="setting-label">${esc(entry.label)}</span>${desc}${noteHtml}</div><div class="setting-control">${input}</div>`;
+  const label = (opts && opts.label) || entry.label;
+  row.innerHTML = `<div class="setting-info"><span class="setting-label">${esc(label)}</span>${desc}${noteHtml}</div><div class="setting-control">${input}</div>`;
   return row;
 }
 
@@ -1951,7 +2059,11 @@ async function updateSetting(key, value) {
   try {
     const r = await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,value})});
     const data = await r.json();
-    if (data.ok) { flashSave(); handleVisibilityUpdate(key, value); }
+    if (data.ok) {
+      flashSave(); handleVisibilityUpdate(key, value);
+      // Skill key/role changes affect the movement status + duplicate warnings on the Keybindings tab
+      if (activeSettingsTab === 'keys' && /^build\.skill\d+\.(key|role)$/.test(key)) rerenderKeybindingsTab();
+    }
     else console.error('Setting error:', data.error);
   } catch(e) { console.error('Setting failed:', e); }
 }
@@ -1995,7 +2107,7 @@ function onSettingsSearch(query) {
     // Find matching settings
     const matches = [];
     for (const [key, entry] of Object.entries(S)) {
-      const matchLabel = (entry.label || '').toLowerCase().includes(q);
+      const matchLabel = contextLabel(entry).toLowerCase().includes(q);
       const matchDesc = (entry.description || '').toLowerCase().includes(q);
       const matchKey = key.toLowerCase().includes(q);
       if (matchLabel || matchDesc || matchKey) {
@@ -2031,7 +2143,7 @@ function onSettingsSearch(query) {
         section.appendChild(title);
 
         for (const { key, entry } of items) {
-          section.appendChild(buildField(key, entry));
+          section.appendChild(buildField(key, entry, null, { label: contextLabel(entry) }));
         }
         results.appendChild(section);
       }
@@ -2639,7 +2751,7 @@ updateDashboard = function(s) {
     const oldKeys = detectedSkillBar.map(d => d.slotIndex+':'+d.skillName).join(',');
     if (newKeys !== oldKeys) {
       detectedSkillBar = s.skillBar;
-      if (settingsLoaded && activeSettingsTab === 'build') renderAllSettings();
+      if (settingsLoaded && (activeSettingsTab === 'build' || activeSettingsTab === 'keys')) renderAllSettings();
     }
   }
 };

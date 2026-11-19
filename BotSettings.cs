@@ -12,7 +12,9 @@ namespace AutoExile
     public class BotSettings : ISettings
     {
         public ToggleNode Enable { get; set; } = new ToggleNode(false);
+        [Menu("Running", "Bot is actively running the selected mode. Toggle with the Start/Stop hotkey.")]
         public ToggleNode Running { get; set; } = new ToggleNode(false);
+        [Menu("Start/Stop Bot", "Hotkey to start or stop the bot.")]
         public HotkeyNode ToggleRunning { get; set; } = new HotkeyNode(Keys.Insert);
 
         [Menu("Test Map Explore", "Hotkey to start/restart map exploration test (navigate to beacon, fight, explore 70%).")]
