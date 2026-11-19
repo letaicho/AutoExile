@@ -30,49 +30,29 @@ namespace AutoExile.Systems
             try
             {
                 var terrain = gc.IngameState.Data.Terrain;
-                var memory = gc.Memory;
 
                 if (terrain.NumCols == 0 || terrain.NumRows == 0)
                     return false;
 
-                var tiles = new ConcurrentDictionary<string, List<Vector2>>();
-                TileStructure[] tileData = memory.ReadStdVector<TileStructure>(terrain.TgtArray);
-
-                if (tileData == null || tileData.Length == 0)
+                // Use HUD's own tile reader rather than raw TileStructure/TgtTileStruct reads:
+                // those offset structs are no longer unmanaged in current GameOffsets, and their
+                // layout tracks HUD updates. Tile.Coordinate is already in grid units
+                // (tileIndex % cols * 23, tileIndex / cols * 23); Name is the TGT detail name.
+                var tileList = gc.IngameState.Data.Tiles;
+                if (tileList == null || tileList.Count == 0)
                     return false;
 
-                var numCols = (int)terrain.NumCols;
+                var tiles = new ConcurrentDictionary<string, List<Vector2>>();
+                foreach (var tile in tileList)
+                {
+                    var gridPos = new Vector2(tile.Coordinate.X, tile.Coordinate.Y);
 
-                Parallel.ForEach(
-                    System.Collections.Concurrent.Partitioner.Create(0, tileData.Length),
-                    (range, _) =>
-                    {
-                        for (int i = range.Item1; i < range.Item2; i++)
-                        {
-                            try
-                            {
-                                var tgtTileStruct = memory.Read<TgtTileStruct>(tileData[i].TgtFilePtr);
-                                string detailName = memory.Read<TgtDetailStruct>(tgtTileStruct.TgtDetailPtr).name.ToString(memory);
-                                string tilePath = tgtTileStruct.TgtPath.ToString(memory);
+                    if (!string.IsNullOrEmpty(tile.Path))
+                        tiles.GetOrAdd(tile.Path, _ => new List<Vector2>()).Add(gridPos);
 
-                                // Grid position: each tile is 23x23 grid cells
-                                var gridPos = new Vector2(
-                                    i % numCols * 23,
-                                    i / numCols * 23
-                                );
-
-                                if (!string.IsNullOrEmpty(tilePath))
-                                    tiles.GetOrAdd(tilePath, _ => new List<Vector2>()).Add(gridPos);
-
-                                if (!string.IsNullOrEmpty(detailName))
-                                    tiles.GetOrAdd(detailName, _ => new List<Vector2>()).Add(gridPos);
-                            }
-                            catch
-                            {
-                                // Skip tiles with bad pointers
-                            }
-                        }
-                    });
+                    if (!string.IsNullOrEmpty(tile.Name))
+                        tiles.GetOrAdd(tile.Name, _ => new List<Vector2>()).Add(gridPos);
+                }
 
                 _tiles = tiles;
                 _loaded = true;

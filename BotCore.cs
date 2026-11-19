@@ -2257,30 +2257,25 @@ namespace AutoExile
             if (gc?.Player == null || !_tileMap.IsLoaded) return;
 
             var terrain = gc.IngameState.Data.Terrain;
-            var memory = gc.Memory;
             var numCols = (int)terrain.NumCols;
             var numRows = (int)terrain.NumRows;
+            if (numCols <= 0 || numRows <= 0) return;
 
-            TileStructure[] tileData;
-            try { tileData = memory.ReadStdVector<TileStructure>(terrain.TgtArray); }
-            catch { LogMessage("[AutoExile] TileDump: failed to read tile data"); return; }
-            if (tileData == null || tileData.Length == 0) return;
+            List<ExileCore.PoEMemory.MemoryObjects.IngameData.Tile>? tileList = null;
+            try { tileList = gc.IngameState.Data.Tiles; }
+            catch { }
+            if (tileList == null || tileList.Count == 0) { LogMessage("[AutoExile] TileDump: failed to read tile data"); return; }
 
             var playerGrid = new System.Numerics.Vector2(gc.Player.GridPosNum.X, gc.Player.GridPosNum.Y);
 
-            // Read all tile names on the main thread (memory access required)
-            var tileEntries = new (string Detail, string Path)[tileData.Length];
-            for (int i = 0; i < tileData.Length; i++)
+            // Index tiles by tile index (row * cols + col); Tile.Coordinate is in grid units (tile * 23).
+            var tileEntries = new (string Detail, string Path)[numCols * numRows];
+            Array.Fill(tileEntries, ("", ""));
+            foreach (var tile in tileList)
             {
-                try
-                {
-                    var tgt = memory.Read<TgtTileStruct>(tileData[i].TgtFilePtr);
-                    tileEntries[i] = (
-                        memory.Read<TgtDetailStruct>(tgt.TgtDetailPtr).name.ToString(memory),
-                        tgt.TgtPath.ToString(memory)
-                    );
-                }
-                catch { tileEntries[i] = ("", ""); }
+                int col = tile.Coordinate.X / 23, row = tile.Coordinate.Y / 23;
+                if (col < 0 || col >= numCols || row < 0 || row >= numRows) continue;
+                tileEntries[row * numCols + col] = (tile.Name ?? "", tile.Path ?? "");
             }
 
             // Collect area transitions currently visible

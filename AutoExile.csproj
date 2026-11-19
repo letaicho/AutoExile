@@ -24,12 +24,33 @@
     </EmbeddedResource>
   </ItemGroup>
 
+  <!--
+    Compile against the running HUD's ExileCore/GameOffsets when available (HUD sets
+    $(exapiPackage) when it compiles plugins). The bundled Resources\ copies can drift
+    from HUD's: e.g. TerrainData.TgtArray changed NativePtrArray -> StdVector, which
+    compiles fine but throws MissingFieldException at runtime.
+  -->
+  <ItemGroup>
+    <!-- The SDK globs Resources\*.dll as None items, which ResolveAssemblyReference treats as
+         {CandidateAssemblyFiles} and prefers over HintPath. Remove them so HintPath wins. -->
+    <None Remove="Resources\*.dll" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <ExileRefDir Condition="'$(exapiPackage)' != '' And Exists('$(exapiPackage)\ExileCore.dll')">$(exapiPackage)</ExileRefDir>
+    <!-- Plugin lives at <HUD>\Plugins\Source\AutoExile, so HUD's DLLs are three levels up. -->
+    <ExileRefDir Condition="'$(ExileRefDir)' == '' And Exists('$(MSBuildProjectDirectory)\..\..\..\ExileCore.dll')">$(MSBuildProjectDirectory)\..\..\..</ExileRefDir>
+    <ExileRefDir Condition="'$(ExileRefDir)' == ''">Resources</ExileRefDir>
+  </PropertyGroup>
+
   <ItemGroup>
     <Reference Include="ExileCore">
-      <HintPath>Resources\ExileCore.dll</HintPath>
+      <HintPath>$(ExileRefDir)\ExileCore.dll</HintPath>
+      <Private>False</Private>
     </Reference>
     <Reference Include="GameOffsets">
-      <HintPath>Resources\GameOffsets.dll</HintPath>
+      <HintPath>$(ExileRefDir)\GameOffsets.dll</HintPath>
+      <Private>False</Private>
     </Reference>
     <Reference Include="ImGui.NET">
       <HintPath>Resources\ImGui.NET.dll</HintPath>
